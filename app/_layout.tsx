@@ -1,5 +1,6 @@
 import { Stack } from "expo-router";
 import { useEffect } from "react";
+import Toast from "react-native-toast-message";
 import { signInAnonymously } from "../src/lib/auth";
 import { supabase } from "../src/lib/supabase";
 
@@ -21,10 +22,9 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false, // globally hide headers by default
-      }}
-    />
+    <>
+      <Stack screenOptions={{ headerShown: false }} />
+      <Toast />
+    </>
   );
 }
