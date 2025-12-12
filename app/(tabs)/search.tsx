@@ -1,145 +1,149 @@
 // app/(tabs)/search.tsx
-import { useEffect, useState } from "react";
-import { FlatList, Image, Pressable, Text, TextInput, View } from "react-native";
-import { searchCardsByName } from "../../src/lib/pokemonapi";
+
+import { useRouter } from "expo-router";
+import { useState } from "react";
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Keyboard,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { supabase } from "../../src/lib/supabase";
 
-// Type definition for Pokémon cards
-type PokemonCard = {
+// Describe what a row in the `cards` table looks like (only what we use)
+type CardRow = {
   id: string;
   name: string;
-  number: string;
+  set_name: string;
+  collector_number: string;
   rarity?: string;
-  supertype?: string;
-  subtypes?: string[];
-  set?: { id: string; name: string };
-  images?: { small: string };
-  hp?: string;
-  types?: string[];
-  legalities?: any;
+  image_url?: string;
 };
+
+const router = useRouter();
 
 export default function SearchScreen() {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<PokemonCard[]>([]);
+  const [results, setResults] = useState<CardRow[]>([]); // 👈 typed here
+  const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
 
-  // Debounce search (wait 300ms after user stops typing)
-  useEffect(() => {
-    const timeout = setTimeout(async () => {
-      if (query.length >= 3) {
-        const cards = await searchCardsByName(query);
-        setResults(cards);
-      } else {
-        setResults([]);
-      }
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [query]);
-
-  async function cacheCard(card: PokemonCard) {
-    console.log("Caching card:", card.id);
-
-    // 1: Check if card already in Supabase
-    const { data: existing, error: selectError } = await supabase
-      .from("cards")
-      .select("id")
-      .eq("tcg_id", card.id)
-      .maybeSingle();
-
-    if (selectError) {
-      console.error("Supabase SELECT error:", selectError);
+  async function handleSearch() {
+    if (query.length < 2) {
+      alert("Search must be at least 2 characters.");
       return;
     }
 
-    let cardId = existing?.id;
+    setLoading(true);
+    setSearched(true);
+    Keyboard.dismiss();
 
-    // 2: Insert into Supabase if missing
-    if (!cardId) {
-      console.log("Inserting card into Supabase…");
+    const { data, error } = await supabase
+      .from("cards")
+      .select("*")
+      .ilike("name", `%${query}%`)
+      .limit(50);
 
-      const { data: inserted, error: insertError } = await supabase
-        .from("cards")
-        .insert([
-          {
-            tcg_id: card.id,
-            name: card.name,
-            supertype: card.supertype ?? "",
-            subtypes: card.subtypes ?? [],
-            set_name: card.set?.name ?? "",
-            set_code: card.set?.id ?? "",
-            collector_number: card.number,
-            rarity: card.rarity ?? "",
-            hp: card.hp ? parseInt(card.hp) : null,
-            types: card.types ?? [],
-            image_url: card.images?.small ?? "",
-            legalities: card.legalities ?? {},
-          },
-        ])
-        .select()
-        .single();
-
-      if (insertError) {
-        console.error("Supabase INSERT error:", insertError);
-        return;
-      }
-
-      console.log("Inserted card:", inserted);
-      cardId = inserted.id;
-    } else {
-      console.log("Card already exists:", cardId);
+    if (error) {
+      console.error(error);
     }
 
-    alert("Card cached in Supabase: " + card.name);
+    setResults((data as CardRow[]) || []); // 👈 cast so TS is happy
+    setLoading(false);
   }
 
   return (
-    <View style={{ flex: 1, padding: 16, backgroundColor: "#f5f5f5" }}>
-      {/* Search Bar */}
-      <TextInput
-        placeholder="Search Pokémon cards…"
-        placeholderTextColor="#888"
-        value={query}
-        onChangeText={setQuery}
+    <View style={{ flex: 1, padding: 16, backgroundColor: "#fafafa" }}>
+      {/* Search Input */}
+      <View
         style={{
-          borderWidth: 1,
-          padding: 12,
           backgroundColor: "white",
-          color: "black",
-          borderRadius: 8,
-          marginBottom: 12,
+          borderRadius: 12,
+          paddingHorizontal: 14,
+          paddingVertical: 6,
+          borderWidth: 1,
+          borderColor: "#ddd",
+          marginBottom: 16,
         }}
-      />
+      >
+        <TextInput
+          placeholder="Search Pokémon cards..."
+          placeholderTextColor="#999"
+          value={query}
+          onChangeText={setQuery}
+          onSubmitEditing={handleSearch}
+          returnKeyType="search"
+          style={{
+            fontSize: 16,
+            paddingVertical: 8,
+            color: "#222",
+          }}
+        />
+      </View>
 
-      {/* Search Results */}
+      {loading && (
+        <ActivityIndicator size="large" color="#007AFF" style={{ marginTop: 20 }} />
+      )}
+
+      {!loading && searched && results.length === 0 && (
+        <Text style={{ textAlign: "center", marginTop: 20, color: "#555" }}>
+          No cards found.
+        </Text>
+      )}
+
+      {/* Results */}
       <FlatList
         data={results}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <Pressable
-            onPress={() => cacheCard(item)}
+            onPress={() => router.push({
+              pathname: "/card/[id]",
+              params: { id: item.id}
+            })}
             style={{
               flexDirection: "row",
-              padding: 10,
               backgroundColor: "white",
-              borderRadius: 8,
-              marginBottom: 10,
+              marginBottom: 12,
+              borderRadius: 12,
+              padding: 10,
               alignItems: "center",
-              elevation: 2,
+              shadowColor: "#000",
+              shadowOpacity: 0.08,
+              shadowRadius: 4,
+              elevation: 3,
             }}
           >
-            {item.images?.small && (
+            {item.image_url && (
               <Image
-                source={{ uri: item.images.small }}
-                style={{ width: 60, height: 85, marginRight: 10 }}
+                source={{ uri: item.image_url }}
+                style={{
+                  width: 65,
+                  height: 90,
+                  borderRadius: 6,
+                  marginRight: 12,
+                }}
               />
             )}
-            <View>
-              <Text style={{ fontSize: 16, fontWeight: "bold" }}>{item.name}</Text>
-              <Text style={{ fontSize: 12, color: "#444" }}>
-                {item.set?.name} • #{item.number}
+
+            <View style={{ flexShrink: 1 }}>
+              <Text style={{ fontSize: 17, fontWeight: "600", color: "#222" }}>
+                {item.name}
               </Text>
-              {item.rarity && <Text style={{ fontSize: 12 }}>{item.rarity}</Text>}
+
+              <Text style={{ fontSize: 14, color: "#666", marginTop: 2 }}>
+                {item.set_name} • #{item.collector_number}
+              </Text>
+
+              {item.rarity && (
+                <Text style={{ marginTop: 4, fontSize: 13, color: "#333" }}>
+                  {item.rarity}
+                </Text>
+              )}
             </View>
           </Pressable>
         )}
