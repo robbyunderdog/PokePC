@@ -1,5 +1,6 @@
-import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import * as Haptics from "expo-haptics";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -8,9 +9,9 @@ import {
   Text,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../../src/lib/supabase";
 
-// The final normalized structure we want:
 type UserCardRow = {
   id: string;
   card_id: string;
@@ -21,46 +22,42 @@ type UserCardRow = {
     set_name: string;
     collector_number: string;
     image_url: string;
-  } | null; // Supabase returns array; we normalize to single item
+  };
 };
 
 export default function CollectionScreen() {
   const [cards, setCards] = useState<UserCardRow[]>([]);
   const [loading, setLoading] = useState(true);
-
+  const [activeId, setActiveId] = useState<string | null>(null);
   const router = useRouter();
 
-  // Fetch user's collection
   async function loadCollection() {
     setLoading(true);
 
-    // Get logged-in user
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) {
-      console.log("No user found for collection");
       setLoading(false);
       return;
     }
 
-    // Join user_cards → cards
     const { data, error } = await supabase
       .from("user_cards")
       .select(
         `
-    id,
-    card_id,
-    quantity,
-    cards:cards!fk_user_cards_cards (
-      id,
-      name,
-      set_name,
-      collector_number,
-      image_url
-    )
-  `
+        id,
+        card_id,
+        quantity,
+        cards:cards!fk_user_cards_cards (
+          id,
+          name,
+          set_name,
+          collector_number,
+          image_url
+        )
+      `
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
@@ -71,69 +68,117 @@ export default function CollectionScreen() {
       return;
     }
 
-    // Normalize cards[] → cards (single object)
-    const normalized = (data || []).map((row: any) => ({
-      ...row,
-      cards: row.cards ?? null, // no [0] needed now!
-    }));
+    const normalized: UserCardRow[] = (data ?? [])
+      .filter((row: any) => row.cards)
+      .map((row: any) => ({
+        id: row.id,
+        card_id: row.card_id,
+        quantity: row.quantity,
+        cards: row.cards,
+      }));
 
     setCards(normalized);
     setLoading(false);
   }
 
-  // Load on mount + realtime update when DB changes
-  useEffect(() => {
-    loadCollection();
+  useFocusEffect(
+    useCallback(() => {
+      loadCollection();
+    }, [])
+  );
 
-    const channel = supabase
-      .channel("collection_refresh")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "user_cards",
-        },
-        () => {
-          loadCollection();
-        }
-      )
-      .subscribe();
+  async function increaseQuantity(row: UserCardRow) {
+    Haptics.selectionAsync();
+    setActiveId(row.id);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
+    const { error } = await supabase
+      .from("user_cards")
+      .update({ quantity: row.quantity + 1 })
+      .eq("id", row.id);
 
-  // Loading state
+    if (!error) {
+      setCards((prev) =>
+        prev.map((c) =>
+          c.id === row.id ? { ...c, quantity: c.quantity + 1 } : c
+        )
+      );
+    }
+
+    setTimeout(() => setActiveId(null), 400);
+  }
+
+  async function decreaseQuantity(row: UserCardRow) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setActiveId(row.id);
+
+    if (row.quantity <= 1) {
+      const { error } = await supabase
+        .from("user_cards")
+        .delete()
+        .eq("id", row.id);
+
+      if (!error) {
+        setCards((prev) => prev.filter((c) => c.id !== row.id));
+      }
+
+      setTimeout(() => setActiveId(null), 400);
+      return;
+    }
+
+    const { error } = await supabase
+      .from("user_cards")
+      .update({ quantity: row.quantity - 1 })
+      .eq("id", row.id);
+
+    if (!error) {
+      setCards((prev) =>
+        prev.map((c) =>
+          c.id === row.id ? { ...c, quantity: c.quantity - 1 } : c
+        )
+      );
+    }
+
+    setTimeout(() => setActiveId(null), 400);
+  }
+
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+      <SafeAreaView
+        style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
+      >
         <ActivityIndicator size="large" />
-      </View>
+      </SafeAreaView>
     );
   }
 
-  // Empty state
   if (cards.length === 0) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+      <SafeAreaView
+        style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
+      >
         <Text style={{ fontSize: 18, color: "#666" }}>
-          You don't have any cards yet.
+          You don’t have any cards yet.
         </Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
-  // Render collection list
   return (
-    <View style={{ flex: 1, padding: 12, backgroundColor: "#fafafa" }}>
+    <SafeAreaView 
+      style={{ flex: 1, backgroundColor: "#fafafa" }}
+      edges={["bottom"]}
+      >
       <FlatList
+        contentContainerStyle={{
+          paddingTop: 12,
+          paddingHorizontal: 12,
+          paddingBottom: 12,
+        }}
         data={cards}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => {
           const c = item.cards;
-          if (!c) return null;
+          const active = activeId === item.id;
 
           return (
             <Pressable
@@ -145,13 +190,9 @@ export default function CollectionScreen() {
                 borderRadius: 12,
                 marginBottom: 10,
                 alignItems: "center",
-                shadowColor: "#000",
-                shadowOpacity: 0.08,
-                shadowRadius: 4,
                 elevation: 3,
               }}
             >
-              {/* Thumbnail */}
               <Image
                 source={{ uri: c.image_url }}
                 style={{
@@ -162,33 +203,60 @@ export default function CollectionScreen() {
                 }}
               />
 
-              {/* Card info */}
-              <View style={{ flexShrink: 1 }}>
-                <Text
-                  style={{ fontSize: 17, fontWeight: "600", color: "#222" }}
-                >
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: "600" }}>
                   {c.name}
                 </Text>
-
-                <Text style={{ fontSize: 14, color: "#666", marginTop: 2 }}>
+                <Text style={{ fontSize: 14, color: "#666" }}>
                   {c.set_name} • #{c.collector_number}
                 </Text>
 
-                <Text
+                <View
                   style={{
-                    fontSize: 14,
-                    color: "#007AFF",
-                    fontWeight: "600",
-                    marginTop: 6,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    marginTop: 8,
                   }}
                 >
-                  Quantity: {item.quantity}
-                </Text>
+                  <Pressable
+                    onPress={() => decreaseQuantity(item)}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      backgroundColor: active ? "#fee2e2" : "#eee",
+                      borderRadius: 6,
+                    }}
+                  >
+                    <Text>{active ? "Removed" : "−"}</Text>
+                  </Pressable>
+
+                  <Text
+                    style={{
+                      marginHorizontal: 12,
+                      fontSize: 16,
+                      fontWeight: "600",
+                    }}
+                  >
+                    {item.quantity}
+                  </Text>
+
+                  <Pressable
+                    onPress={() => increaseQuantity(item)}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      backgroundColor: active ? "#dcfce7" : "#eee",
+                      borderRadius: 6,
+                    }}
+                  >
+                    <Text>{active ? "Added" : "+"}</Text>
+                  </Pressable>
+                </View>
               </View>
             </Pressable>
           );
         }}
       />
-    </View>
+    </SafeAreaView>
   );
 }

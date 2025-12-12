@@ -44,8 +44,8 @@ export default function SearchScreen() {
     setLoading(false);
   }
 
-  // Handle enter press
-  function handleSubmit() {
+  // 🔑 Single search handler (button + keyboard)
+  function handleSearch() {
     Keyboard.dismiss();
     searchCards();
   }
@@ -57,7 +57,15 @@ export default function SearchScreen() {
         placeholderTextColor="#888"
         value={query}
         onChangeText={setQuery}
-        onSubmitEditing={handleSubmit}
+        onSubmitEditing={handleSearch}
+        returnKeyType="search"
+
+        /* 🔑 SPELLCHECK / KEYBOARD FIXES */
+        autoCorrect={false}
+        spellCheck={false}
+        autoCapitalize="none"
+        textContentType="none"
+
         style={{
           borderWidth: 1,
           padding: 12,
@@ -70,7 +78,7 @@ export default function SearchScreen() {
       />
 
       <Pressable
-        onPress={searchCards}
+        onPress={handleSearch}
         style={{
           backgroundColor: "#007AFF",
           padding: 12,
@@ -94,7 +102,7 @@ export default function SearchScreen() {
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <Pressable
-            onPress={() => router.push(`/card/${item.id}`)} // UUID navigation
+            onPress={() => router.push(`/card/${item.id}`)}
             style={{
               flexDirection: "row",
               backgroundColor: "white",
