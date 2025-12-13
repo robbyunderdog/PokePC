@@ -1,6 +1,6 @@
 import { Stack } from "expo-router";
 import { useEffect } from "react";
-import Toast from "react-native-toast-message";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { signInAnonymously } from "../src/lib/auth";
 import { supabase } from "../src/lib/supabase";
 
@@ -22,9 +22,16 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <>
-      <Stack screenOptions={{ headerShown: false }} />
-      <Toast />
-    </>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <Stack 
+        screenOptions={{ 
+          headerShown: false, 
+          presentation: "transparentModal",
+          animation: "none",
+          contentStyle: {
+            backgroundColor: "transparent",
+          },
+        }} />
+    </GestureHandlerRootView>
   );
 }
